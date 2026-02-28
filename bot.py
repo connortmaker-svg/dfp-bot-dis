@@ -31,52 +31,86 @@ def get_week_start(dt):
     week_start = dt.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=days_since_start)
     return week_start
 
-def get_weekly_leaderboard():
+def get_all_time_stats():
     c.execute("SELECT user_id, start_time, duration_seconds FROM sessions WHERE end_time IS NOT NULL")
     all_sessions = c.fetchall()
     
-    # Calculate current weekly start
     now = datetime.now()
-    week_start = get_week_start(now)
     
-    user_totals = {}
+    # week_start -> { user_id: total_seconds }
+    weekly_totals = {}
+    # user_id -> total_seconds
+    overall_totals = {}
+    
     for uid, s_str, d_sec in all_sessions:
         s_time = datetime.fromisoformat(s_str)
-        if s_time >= week_start:
-            if uid not in user_totals:
-                user_totals[uid] = 0
-            user_totals[uid] += d_sec
+        w_start = get_week_start(s_time)
+        
+        if w_start not in weekly_totals:
+            weekly_totals[w_start] = {}
+        if uid not in weekly_totals[w_start]:
+            weekly_totals[w_start][uid] = 0
+        weekly_totals[w_start][uid] += d_sec
+        
+        if uid not in overall_totals:
+            overall_totals[uid] = 0
+        overall_totals[uid] += d_sec
             
     # Also add current active session times
     c.execute("SELECT user_id, start_time FROM sessions WHERE end_time IS NULL")
     active_sessions = c.fetchall()
     for uid, s_str in active_sessions:
         s_time = datetime.fromisoformat(s_str)
-        if s_time >= week_start:
-            current_duration = (now - s_time).total_seconds()
-            if uid not in user_totals:
-                user_totals[uid] = 0
-            user_totals[uid] += current_duration
+        w_start = get_week_start(s_time)
+        current_duration = (now - s_time).total_seconds()
+        
+        if w_start not in weekly_totals:
+            weekly_totals[w_start] = {}
+        if uid not in weekly_totals[w_start]:
+            weekly_totals[w_start][uid] = 0
+        weekly_totals[w_start][uid] += current_duration
+        
+        if uid not in overall_totals:
+            overall_totals[uid] = 0
+        overall_totals[uid] += current_duration
             
-    return user_totals
+    return overall_totals, weekly_totals
 
-def create_tracking_embed(user_totals=None):
-    if user_totals is None:
-        user_totals = get_weekly_leaderboard()
+def create_tracking_embed(stats=None):
+    if stats is None:
+        stats = get_all_time_stats()
         
-    embed = discord.Embed(title="Time Tracking", description="Click the buttons below to log in or log out.", color=discord.Color.blue())
+    overall_totals, weekly_totals = stats
     
-    if not user_totals:
-        embed.add_field(name="Weekly Leaderboard", value="No time logged this week yet.", inline=False)
+    embed = discord.Embed(title="Project Time Tracking (Ends April 30th)", description="Click the buttons below to log in or log out.", color=discord.Color.blue())
+    
+    if not overall_totals:
+        embed.add_field(name="Time Logged", value="No time logged yet.", inline=False)
     else:
-        # Sort by hours descending
-        sorted_users = sorted(user_totals.items(), key=lambda item: item[1], reverse=True)
-        leaderboard_text = ""
-        for uid, total_sec in sorted_users:
+        # Total overall time
+        sorted_overall = sorted(overall_totals.items(), key=lambda item: item[1], reverse=True)
+        overall_text = ""
+        for uid, total_sec in sorted_overall:
             hours = total_sec / 3600
-            leaderboard_text += f"<@{uid}>: {hours:.2f} hours\n"
-        embed.add_field(name="Weekly Leaderboard", value=leaderboard_text, inline=False)
+            overall_text += f"<@{uid}>: {hours:.2f} hours\n"
+        embed.add_field(name="Total Overall Time", value=overall_text, inline=False)
         
+        # Weekly breakdown
+        # Sort weeks chronologically
+        sorted_weeks = sorted(weekly_totals.keys())
+        for w_start in sorted_weeks:
+            w_end = w_start + timedelta(days=6)
+            week_label = f"Week of {w_start.strftime('%b %d')} - {w_end.strftime('%b %d')}"
+            
+            # Sort users for this week
+            sorted_week_users = sorted(weekly_totals[w_start].items(), key=lambda item: item[1], reverse=True)
+            week_text = ""
+            for uid, total_sec in sorted_week_users:
+                hours = total_sec / 3600
+                week_text += f"<@{uid}>: {hours:.2f} hours\n"
+                
+            embed.add_field(name=week_label, value=week_text, inline=False)
+            
     embed.set_footer(text="Totals reset every Friday!")
     return embed
 
