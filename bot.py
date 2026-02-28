@@ -85,14 +85,13 @@ def create_tracking_embed(stats=None):
     embed = discord.Embed(title="Project Time Tracking (Ends April 30th)", description="Click the buttons below to log in or log out.", color=discord.Color.blue())
     
     if not overall_totals:
-        embed.add_field(name="Time Logged", value="No time logged yet.", inline=False)
+        embed.add_field(name="Logged Data", value="No time logged yet.", inline=False)
     else:
         # Total overall time
-        sorted_overall = sorted(overall_totals.items(), key=lambda item: item[1], reverse=True)
         overall_text = ""
-        for uid, total_sec in sorted_overall:
+        for uid, total_sec in overall_totals.items():
             hours = total_sec / 3600
-            overall_text += f"<@{uid}>: {hours:.2f} hours\n"
+            overall_text += f"<@{uid}>: **{hours:.2f} hours**\n"
         embed.add_field(name="Total Overall Time", value=overall_text, inline=False)
         
         # Weekly breakdown
@@ -102,10 +101,9 @@ def create_tracking_embed(stats=None):
             w_end = w_start + timedelta(days=6)
             week_label = f"Week of {w_start.strftime('%b %d')} - {w_end.strftime('%b %d')}"
             
-            # Sort users for this week
-            sorted_week_users = sorted(weekly_totals[w_start].items(), key=lambda item: item[1], reverse=True)
+            # List users for this week
             week_text = ""
-            for uid, total_sec in sorted_week_users:
+            for uid, total_sec in weekly_totals[w_start].items():
                 hours = total_sec / 3600
                 week_text += f"<@{uid}>: {hours:.2f} hours\n"
                 
@@ -157,25 +155,11 @@ class TimeTrackingView(discord.ui.View):
         c.execute("UPDATE sessions SET end_time=?, duration_seconds=? WHERE rowid=?", (end_time.isoformat(), duration, rowid))
         conn.commit()
         
-        # Calculate weekly time to display in the ephemeral message
-        week_start = get_week_start(end_time)
-        
-        c.execute("SELECT start_time, duration_seconds FROM sessions WHERE user_id=? AND end_time IS NOT NULL", (user_id,))
-        all_sessions = c.fetchall()
-        
-        weekly_seconds = 0
-        for s_str, d_sec in all_sessions:
-            s_time = datetime.fromisoformat(s_str)
-            if s_time >= week_start:
-                weekly_seconds += d_sec
-                
-        hours = weekly_seconds / 3600
-        
         # Update the embed message
         new_embed = create_tracking_embed()
         await interaction.message.edit(embed=new_embed)
         
-        await interaction.response.send_message(f"Logged out. Session duration: {duration/3600:.2f} hours. Total this week: {hours:.2f} hours.", ephemeral=True)
+        await interaction.response.send_message(f"Logged out. Added {duration/3600:.2f} hours to your tracking logs.", ephemeral=True)
 
 @bot.event
 async def on_ready():
