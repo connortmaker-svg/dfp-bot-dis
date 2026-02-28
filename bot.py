@@ -59,7 +59,9 @@ def get_all_time_stats():
     # Also add current active session times
     c.execute("SELECT user_id, start_time FROM sessions WHERE end_time IS NULL")
     active_sessions = c.fetchall()
+    active_uids = []
     for uid, s_str in active_sessions:
+        active_uids.append(uid)
         s_time = datetime.fromisoformat(s_str)
         w_start = get_week_start(s_time)
         current_duration = (now - s_time).total_seconds()
@@ -74,13 +76,13 @@ def get_all_time_stats():
             overall_totals[uid] = 0
         overall_totals[uid] += current_duration
             
-    return overall_totals, weekly_totals
+    return overall_totals, weekly_totals, active_uids
 
 def create_tracking_embed(stats=None):
     if stats is None:
         stats = get_all_time_stats()
         
-    overall_totals, weekly_totals = stats
+    overall_totals, weekly_totals, active_uids = stats
     
     embed = discord.Embed(title="Project Time Tracking (Ends April 30th)", description="Click the buttons below to log in or log out.", color=discord.Color.blue())
     
@@ -108,6 +110,10 @@ def create_tracking_embed(stats=None):
                 week_text += f"<@{uid}>: {hours:.2f} hours\n"
                 
             embed.add_field(name=week_label, value=week_text, inline=False)
+            
+        if active_uids:
+            active_text = ", ".join(f"<@{uid}>" for uid in active_uids)
+            embed.add_field(name="🟢 Currently Active", value=active_text, inline=False)
             
     embed.set_footer(text="Totals reset every Friday!")
     return embed
