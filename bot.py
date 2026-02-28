@@ -31,6 +31,55 @@ def get_week_start(dt):
     week_start = dt.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=days_since_start)
     return week_start
 
+def get_weekly_leaderboard():
+    c.execute("SELECT user_id, start_time, duration_seconds FROM sessions WHERE end_time IS NOT NULL")
+    all_sessions = c.fetchall()
+    
+    # Calculate current weekly start
+    now = datetime.now()
+    week_start = get_week_start(now)
+    
+    user_totals = {}
+    for uid, s_str, d_sec in all_sessions:
+        s_time = datetime.fromisoformat(s_str)
+        if s_time >= week_start:
+            if uid not in user_totals:
+                user_totals[uid] = 0
+            user_totals[uid] += d_sec
+            
+    # Also add current active session times
+    c.execute("SELECT user_id, start_time FROM sessions WHERE end_time IS NULL")
+    active_sessions = c.fetchall()
+    for uid, s_str in active_sessions:
+        s_time = datetime.fromisoformat(s_str)
+        if s_time >= week_start:
+            current_duration = (now - s_time).total_seconds()
+            if uid not in user_totals:
+                user_totals[uid] = 0
+            user_totals[uid] += current_duration
+            
+    return user_totals
+
+def create_tracking_embed(user_totals=None):
+    if user_totals is None:
+        user_totals = get_weekly_leaderboard()
+        
+    embed = discord.Embed(title="Time Tracking", description="Click the buttons below to log in or log out.", color=discord.Color.blue())
+    
+    if not user_totals:
+        embed.add_field(name="Weekly Leaderboard", value="No time logged this week yet.", inline=False)
+    else:
+        # Sort by hours descending
+        sorted_users = sorted(user_totals.items(), key=lambda item: item[1], reverse=True)
+        leaderboard_text = ""
+        for uid, total_sec in sorted_users:
+            hours = total_sec / 3600
+            leaderboard_text += f"<@{uid}>: {hours:.2f} hours\n"
+        embed.add_field(name="Weekly Leaderboard", value=leaderboard_text, inline=False)
+        
+    embed.set_footer(text="Totals reset every Friday!")
+    return embed
+
 class TimeTrackingView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -48,6 +97,11 @@ class TimeTrackingView(discord.ui.View):
             
         c.execute("INSERT INTO sessions (user_id, start_time, end_time, duration_seconds) VALUES (?, ?, NULL, 0)", (user_id, now))
         conn.commit()
+        
+        # Update the embed message
+        new_embed = create_tracking_embed()
+        await interaction.message.edit(embed=new_embed)
+        
         await interaction.response.send_message("Logged in successfully!", ephemeral=True)
 
     @discord.ui.button(label='Logout', style=discord.ButtonStyle.red, custom_id='logout_button')
@@ -69,7 +123,7 @@ class TimeTrackingView(discord.ui.View):
         c.execute("UPDATE sessions SET end_time=?, duration_seconds=? WHERE rowid=?", (end_time.isoformat(), duration, rowid))
         conn.commit()
         
-        # Calculate weekly time
+        # Calculate weekly time to display in the ephemeral message
         week_start = get_week_start(end_time)
         
         c.execute("SELECT start_time, duration_seconds FROM sessions WHERE user_id=? AND end_time IS NOT NULL", (user_id,))
@@ -83,6 +137,10 @@ class TimeTrackingView(discord.ui.View):
                 
         hours = weekly_seconds / 3600
         
+        # Update the embed message
+        new_embed = create_tracking_embed()
+        await interaction.message.edit(embed=new_embed)
+        
         await interaction.response.send_message(f"Logged out. Session duration: {duration/3600:.2f} hours. Total this week: {hours:.2f} hours.", ephemeral=True)
 
 @bot.event
@@ -92,7 +150,7 @@ async def on_ready():
 
 @bot.command()
 async def setup(ctx):
-    embed = discord.Embed(title="Time Tracking", description="Click the buttons below to log in or log out.", color=discord.Color.blue())
+    embed = create_tracking_embed()
     await ctx.send(embed=embed, view=TimeTrackingView())
 
 if __name__ == '__main__':
